@@ -1,0 +1,171 @@
+---
+title: 'R Guided Project 02: Creating An Efficient Data Analysis Workflow, Part 2'
+output: html_document
+---
+
+```{r}
+library(tidyverse)
+library(lubridate)
+
+sales <- read.csv("sales2019.csv")
+```
+
+This R Markdown file can be considered as a continuation of the previous analysis.  
+  
+The company has provided us more data on some of its 2019 book sales, and it wants us to extract some usable knowledge from it. It launched a new program encouraging customers to buy more books on July 1st, 2019, and it wants to know if this new program was successful at increasing sales and improving review quality.
+
+# Data Exploration
+
+```{r}
+# How big is the dataset?
+dim(sales)
+```
+
+```{r}
+# What are the column names?
+colnames(sales)
+
+# What data is stored in the first 6 rows of the dataset?
+head(sales)
+```
+
+The `date` column shows the date when the order of the books was made.  
+`user_submitted_review` contains short reviews of particular titles.  
+`title` contains titles of the books.  
+`total_purchased` indicates the numbers of the books sold to that particular customer on a given day.  
+`customer_type` determines whether the customer was an individual or a business.
+
+```{r}
+# What are the types of each of the columns?
+str(sales)
+```
+
+The `total_purchased` column stores integer values. All other columns are of character data type.
+
+```{r}
+# How many missing values are there in particular columns?
+colSums(is.na(sales))
+```
+
+Three columns of the dataset do not have any missing values, but the other two have hundreds of them.
+
+
+# Handling Missing Data
+
+```{r}
+# Remove the rows with no 'user_submitted_review'
+complete_sales <- sales %>% 
+  filter(
+    !is.na(user_submitted_review)
+  )
+
+# Make sure that the 'user_submitted_review' column does not contain any missing values
+colSums(is.na(complete_sales))
+
+# Calculate the mean of the 'total_purchased' column, without the missing values
+purchase_mean <- complete_sales %>% 
+  filter(!is.na(total_purchased)) %>% 
+  pull(total_purchased) %>% 
+  mean %>% print
+
+# Assign this mean to all of the rows where 'total_purchased' was NA
+complete_sales <- complete_sales %>% 
+  mutate(
+    total_purchased = if_else(is.na(total_purchased), 
+                                as.integer(purchase_mean),
+                                total_purchased)
+  )
+
+# Make sure that the 'total_purchased' column does not have missing values anymore
+complete_sales %>% pull(total_purchased) %>% is.na %>% sum
+
+# Check the first and last 6 rows of the data
+head(complete_sales)
+tail(complete_sales)
+```
+
+
+# Processing Review Data
+
+```{r}
+# Pull all unique values from the 'user_submitted_review' column
+complete_sales %>% pull(user_submitted_review) %>% unique
+```
+
+The reviews range from outright hate ("Hated it") to positive ("Awesome!").  
+The chunk of code below helps to determine which reviews are positive and which are negative.
+
+```{r}
+is_positive <- function(review) {
+  review_positive = case_when(
+    str_detect(review, "Awesome") ~ TRUE,
+    str_detect(review, "OK") ~ TRUE,
+    str_detect(review, "Never") ~ TRUE,
+    str_detect(review, "a lot") ~ TRUE,
+    TRUE ~ FALSE # The review did not contain any of the above phrases
+  )
+}
+complete_sales <- complete_sales %>% 
+  mutate(
+    is_positive = unlist(map(user_submitted_review, is_positive))
+  )
+
+# Check the first and last 6 rows of the data
+head(complete_sales)
+tail(complete_sales)
+```
+
+
+# Comparing Book Sales Between Pre- and Post-Program Sales
+
+```{r}
+complete_sales <- complete_sales %>% 
+  mutate(
+    date_status = if_else(mdy(date) < ymd("2019/07/01"), "Pre", "Post")
+  )
+complete_sales %>% 
+  group_by(date_status) %>% 
+  summarize(
+    books_purchased = sum(total_purchased)
+  )
+```
+
+It doesn't seem that the program has increased sales. Maybe there were certain books that increased in sales?
+
+```{r}
+complete_sales %>% 
+  group_by(date_status, title) %>% 
+  summarize(
+    books_purchased = sum(total_purchased)
+  ) %>% 
+  arrange(title, date_status)
+```
+
+It turns out that certain books actually got more popular after the program started - 'R For Dummies' and 'Secrets of R For Advanced Students' are those which increased their sales.
+
+
+# Comparing Book Sales Within Customer Type
+
+```{r}
+complete_sales %>% 
+  group_by(date_status, customer_type) %>% 
+  summarize(
+    books_purchased = sum(total_purchased)
+  ) %>% 
+  arrange(customer_type, date_status)
+```
+
+Based on the table, it looks like businesses started purchasing more books after the program! There was actually a drop in individual sales.
+
+
+# Comparing Review Sentiment Between Pre- and Post-Program Sales
+
+```{r}
+complete_sales %>% 
+  group_by(date_status) %>% 
+  summarize(
+    num_positive_reviews = sum(is_positive)
+  )
+```
+
+There's slightly more reviews after the program, but this difference seems negligible.
